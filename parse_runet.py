@@ -9,9 +9,6 @@ import numpy as np
 import uuid
 import json
 
-import plotly
-import plotly.express as px
-import plotly.graph_objs as go
 import pickle
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
@@ -31,7 +28,9 @@ import torch
 from transformers import AutoModelForSequenceClassification
 from transformers import BertTokenizerFast
 import platform
-
+from selenium.webdriver.chrome.options import Options
+chrome_options = Options()
+chrome_options.add_argument("--headless")
 class SiteRatingExtractor:
     
     def __init__(self):
@@ -48,13 +47,13 @@ class SiteRatingExtractor:
         res = float(result['pr']) + float(result['iks'])/100 + self.predict_sentiment(result['google_titles']) + \
             self.predict_sentiment(result['google_subtitles']) + self.predict_sentiment(result['yandex_news_headers']) + \
                 self.predict_sentiment(result['yandex_reviews']['reviews']) + self.predict_sentiment(result['yandex_reviews']['tags']) + \
-                    (float(result['yandex_reviews']['mark'].replace(',','.')) - 3.5) * 10
+                    (float(str(result['yandex_reviews']['mark']).replace(',','.')) - 3.5) * 10
         
         return [res, result]
         
     def get_rating(self, name):
         name = name + ' официальный сайт'
-        with webdriver.Chrome(ChromeDriverManager().install()) as driver:
+        with webdriver.Chrome(ChromeDriverManager().install(),options=chrome_options) as driver:
             driver.get('https://yandex.ru/search/?text=' + name.replace(' ','+'))
             sleep(2)
             html = driver.page_source
@@ -62,7 +61,7 @@ class SiteRatingExtractor:
             link = html.split('tabindex="0" target=')[1].split('<b>')[1].split('</b>')[0]
         link = '.'.join(link.split('.')[-2:]).replace('https://', '').replace('http://','').replace('/','')
 
-        with webdriver.Chrome(ChromeDriverManager().install()) as driver:
+        with webdriver.Chrome(ChromeDriverManager().install(),options=chrome_options) as driver:
             driver.get('https://pr-cy.ru/counter/')
             sleep(2)
             elem = driver.find_elements_by_class_name('form-control')
@@ -101,7 +100,7 @@ class SiteRatingExtractor:
         return [rating, IKS]
     
     def get_google_titles_subtitles(self, name):
-        with webdriver.Chrome(ChromeDriverManager().install()) as driver:
+        with webdriver.Chrome(ChromeDriverManager().install(),options=chrome_options) as driver:
             driver.get('https://google.com')
             elem = driver.find_element_by_css_selector('.gLFyf')
             elem.send_keys(name)
@@ -122,14 +121,14 @@ class SiteRatingExtractor:
         return [titles, subtitles]
     
     def get_news_headers(self, name):
-        with webdriver.Chrome(ChromeDriverManager().install()) as driver:
+        with webdriver.Chrome(ChromeDriverManager().install(),options=chrome_options) as driver:
             driver.get('https://newssearch.yandex.ru/news/search?text=' + name.replace(' ', '+'))
             html = driver.page_source
             headers = [x for x in [x.split('"text">')[1].split('<')[0] for x in html.split('mg-snippet__url')[1:]] if len(x) >0]
         return headers
     
     def get_reviews_yandex(self, name):
-        with webdriver.Chrome(ChromeDriverManager().install()) as driver:
+        with webdriver.Chrome(ChromeDriverManager().install(),options=chrome_options) as driver:
             result = {}
             result['tags'] = []
             result['reviews'] = []
@@ -163,11 +162,15 @@ class SiteRatingExtractor:
         
     @torch.no_grad()    
     def predict_sentiment(self, text):
-        inputs = self.tokenizer(text, max_length=512, padding=True, truncation=True, return_tensors='pt')
-        outputs = self.model(**inputs)
-        predicted = torch.nn.functional.softmax(outputs.logits, dim=1)
-        pos = predicted.numpy()[:,1]*10
-        neg = predicted.numpy()[:,2]*10
+        try:
+            inputs = self.tokenizer(text, max_length=512, padding=True, truncation=True, return_tensors='pt')
+            outputs = self.model(**inputs)
+            predicted = torch.nn.functional.softmax(outputs.logits, dim=1)
+            pos = predicted.numpy()[:,1]*10
+            neg = predicted.numpy()[:,2]*10
+        except:
+            pos = 0
+            neg = 0
         return np.sum(pos - neg)
 
 
